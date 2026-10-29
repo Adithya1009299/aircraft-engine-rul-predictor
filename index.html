@@ -1,0 +1,150 @@
+!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Engine RUL Predictor (LSTM)</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js"></script>
+<style>
+:root{--bg:#f5f7fa;--card:#fff;--tx:#14213d;--mut:#667085;--bd:#e1e5ec;--a:#2563eb;--g:#16a34a;--y:#d97706;--r:#dc2626;--c2:#9333ea;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f1521;--card:#182031;--tx:#e8edf7;--mut:#93a0b8;--bd:#2a3550;--a:#60a5fa;--g:#4ade80;--y:#fbbf24;--r:#f87171;--c2:#c084fc;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#0f1521;--card:#182031;--tx:#e8edf7;--mut:#93a0b8;--bd:#2a3550;--a:#60a5fa;--g:#4ade80;--y:#fbbf24;--r:#f87171;--c2:#c084fc;color-scheme:dark}
+*{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1000px;margin:0 auto;padding:16px}
+h1{font-size:22px;margin:4px 0}h2{font-size:15px;margin:0 0 8px}
+p.s{color:var(--mut);margin:0 0 14px}
+.g{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));margin-bottom:12px}
+.c{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px}
+button,select,.f{font:inherit;border:1px solid var(--bd);background:var(--card);color:var(--tx);border-radius:8px;padding:8px 12px;cursor:pointer}
+button.p{background:var(--a);color:#fff;border-color:var(--a)}button:disabled{opacity:.5}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+canvas{width:100%;height:200px;display:block}
+.big{font-size:42px;font-weight:700;line-height:1}
+.badge{display:inline-block;padding:3px 10px;border-radius:99px;color:#fff;font-weight:600;font-size:13px}
+.bar{height:10px;background:var(--bd);border-radius:6px;overflow:hidden}.bar i{display:block;height:100%;width:0;background:var(--a)}
+input[type=range]{width:100%}
+.t{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:14px}td,th{padding:6px 8px;border-bottom:1px solid var(--bd);text-align:left;white-space:nowrap}
+.m{color:var(--mut);font-size:13px}
+</style></head><body><main>
+<div class="row" style="justify-content:space-between"><h1>✈️ Aircraft Engine RUL Predictor</h1><button id="th">🌓 Theme</button></div>
+<p class="s">LSTM model (TensorFlow.js) • NASA C-MAPSS style degradation data • Remaining Useful Life prediction</p>
+ 
+<div class="c" style="margin-bottom:12px">
+<h2>1. Data and Model</h2>
+<div class="row">
+<button id="gen">Generate demo data</button>
+<label class="f">Upload C-MAPSS train_FD00x.txt<input id="up" type="file" accept=".txt,.csv" hidden></label>
+<select id="ar"><option>LSTM</option><option>GRU</option></select><button id="tr" class="p" disabled>Train model</button>
+<select id="ep"><option>8</option><option selected>15</option><option>30</option></select><span class="m">epochs</span>
+</div>
+<div class="bar" style="margin:10px 0 4px"><i id="pb"></i></div>
+<div class="m" id="st">Click Generate demo data (or upload real C-MAPSS file) to start.</div>
+</div>
+ 
+<div class="g">
+<div class="c"><h2>Training loss (MSE)</h2><canvas id="cl"></canvas></div>
+<div class="c"><h2>Model quality (test engines)</h2><div class="big" id="rm">-</div><div class="m">RMSE in cycles</div><div class="m" id="mt" style="margin-top:8px"></div><div class="t"><table id="cmp" style="margin-top:8px"></table></div></div>
+</div>
+ 
+<div class="c" style="margin-bottom:12px">
+<h2>2. Live Engine Monitor</h2>
+<div class="row"><select id="en"></select><span class="m" id="cy"></span><label class="m">Alert below <input id="ath" type="number" value="40" class="f" style="width:70px"> cycles</label></div><div id="al" style="display:none;margin:8px 0;padding:8px 12px;border-radius:8px;background:var(--r);color:#fff"></div>
+<input type="range" id="sl" min="1" max="100" value="100" disabled>
+<div class="g" style="margin:10px 0 0">
+<div><div class="m">Predicted RUL</div><div class="big" id="pr">-</div><div style="margin:8px 0"><span class="badge" id="bd" style="background:var(--mut)">No model</span></div><div class="m" id="rc"></div></div>
+<div><div class="m">Health index</div><div class="bar" style="height:18px;margin:6px 0"><i id="hb" style="background:var(--g)"></i></div><div class="m" id="tr2"></div></div>
+</div></div>
+ 
+<div class="g">
+<div class="c"><h2>Predicted vs True RUL</h2><canvas id="cp"></canvas><div class="m">Blue: true • Purple: prediction • Shaded: uncertainty (±1σ, MC dropout)</div></div>
+<div class="c"><h2>Sensor trend</h2><select id="sn"></select><canvas id="cs"></canvas></div>
+<div class="c"><h2>Multi-engine comparison (predicted RUL)</h2><canvas id="cm"></canvas><div class="m" id="lg"></div></div>
+</div>
+ 
+<div class="c"><div class="row" style="justify-content:space-between"><h2>3. Fleet Maintenance Planner</h2><button id="ex" disabled>⬇ Export CSV</button></div>
+<div class="t"><table id="ft"><thead><tr><th>Engine</th><th>Cycle</th><th>Pred RUL</th><th>True RUL</th><th>Status</th></tr></thead><tbody></tbody></table></div></div>
+ 
+<script>
+const W=30,CAP=125,$=id=>document.getElementById(id);
+const NAMES=['T24 LPC outlet','T50 LPT outlet','P30 HPC outlet','Nf fan speed','Ps30 static P','Fuel ratio'];
+let eng=[],tr=[],te=[],F=6,names=NAMES,mn=[],mx=[],model=null,losses=[],preds={},sd={},R={};
+const css=n=>getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const rnd=(a,b)=>a+Math.random()*(b-a),gs=()=>(Math.random()+Math.random()+Math.random()-1.5)*1.2;
+const st=t=>$('st').textContent=t;
+$('th').onclick=()=>{const r=document.documentElement;r.dataset.theme=(r.dataset.theme||(matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light'))==='dark'?'light':'dark';draw()};
+ 
+function stat(r){return r>80?['Healthy','--g','Normal operation. Next check at routine interval.']:r>30?['Caution','--y','Schedule inspection within the next ~'+Math.max(5,Math.round(r*.6))+' cycles.']:['Critical','--r','Ground the engine and plan overhaul immediately.']}
+ 
+function synth(){
+  const d=[1,-1,1,-1,1,-1],a=[.9,.8,.7,.85,.6,.75];eng=[];F=6;names=NAMES;
+  for(let i=0;i<30;i++){const L=Math.floor(rnd(140,260)),k=a.map(v=>v*rnd(.8,1.2)),x=[],r=[];
+    for(let t=0;t<L;t++){const p=t/L;x.push(d.map((s,j)=>.5+s*k[j]*.5*Math.pow(p,2.2)+gs()*.03));r.push(Math.min(CAP,L-t-1))}
+    eng.push({id:i+1,x,r})}
+  split()}
+function split(){const n=Math.max(3,Math.min(6,Math.floor(eng.length*.15)));te=eng.slice(-n);tr=eng.slice(0,-n);
+  mn=[];mx=[];for(let j=0;j<F;j++){let lo=1e9,hi=-1e9;tr.forEach(e=>e.x.forEach(r=>{lo=Math.min(lo,r[j]);hi=Math.max(hi,r[j])}));mn.push(lo);mx.push(hi||lo+1)}
+  $('en').innerHTML=te.map((e,i)=>`<option value="${i}">Engine #${e.id}</option>`).join('');
+  $('sn').innerHTML=names.map((n,i)=>`<option value="${i}">${n}</option>`).join('');
+  $('tr').disabled=false;model=null;preds={};sd={};R={};losses=[];$('cmp').innerHTML='';$('rm').textContent='-';$('mt').textContent='';
+  st(`${eng.length} engines loaded: ${tr.length} train, ${te.length} test, ${F} sensors. Now train the LSTM.`);sel()}
+$('gen').onclick=synth;
+ 
+$('up').onchange=async ev=>{const f=ev.target.files[0];if(!f)return;const rows=(await f.text()).trim().split(/\r?\n/).map(l=>l.trim().split(/[\s,]+/).map(Number));
+  if(rows[0].length<26){st('Format not recognised: need 26 columns (unit, cycle, 3 settings, 21 sensors).');return}
+  const use=[2,3,4,7,8,9,11,12,13,14,15,17,20,21];names=use.map(s=>'Sensor s'+s);F=use.length;const m={};
+  rows.forEach(r=>(m[r[0]]=m[r[0]]||[]).push(r));
+  eng=Object.keys(m).map(u=>{const rs=m[u].sort((a,b)=>a[1]-b[1]),L=rs.length;return{id:+u,x:rs.map(r=>use.map(s=>r[4+s])),r:rs.map((_,t)=>Math.min(CAP,L-t-1))}});
+  split()};
+ 
+function win(e,t){const o=[];for(let i=t-W+1;i<=t;i++){const r=e.x[Math.max(0,i)];o.push(r.map((v,j)=>(v-mn[j])/(mx[j]-mn[j])))}return o}
+ 
+$('tr').onclick=async()=>{
+  $('tr').disabled=true;$('gen').disabled=true;losses=[];
+  const X=[],Y=[];tr.forEach(e=>{for(let t=0;t<e.x.length;t+=2){X.push(win(e,t));Y.push([e.r[t]/CAP])}});
+  const xs=tf.tensor3d(X),ys=tf.tensor2d(Y);
+  model=tf.sequential();
+  const A=$('ar').value;model.add(A==='GRU'?tf.layers.gru({units:24,inputShape:[W,F]}):tf.layers.lstm({units:24,inputShape:[W,F]}));model.add(tf.layers.dropout({rate:.2}));
+  model.add(tf.layers.dense({units:12,activation:'relu'}));
+  model.add(tf.layers.dense({units:1}));
+  model.compile({optimizer:tf.train.adam(.005),loss:'meanSquaredError'});
+  const E=+$('ep').value;
+  await model.fit(xs,ys,{epochs:E,batchSize:64,shuffle:true,callbacks:{onEpochEnd:async(e,l)=>{losses.push(l.loss);$('pb').style.width=((e+1)/E*100)+'%';st(`Epoch ${e+1}/${E} • loss ${l.loss.toFixed(5)}`);draw();await tf.nextFrame()}}});
+  xs.dispose();ys.dispose();
+  let se=0,n=0;preds={};sd={};
+  te.forEach((e,i)=>{const w=e.x.map((_,t)=>win(e,t));sd[i]=tf.tidy(()=>{const T=tf.tensor3d(w),S=[];for(let k=0;k<12;k++)S.push(model.apply(T,{training:true}).mul(CAP));return Array.from(tf.moments(tf.stack(S),0).variance.sqrt().dataSync())});const p=tf.tidy(()=>Array.from(model.predict(tf.tensor3d(w)).dataSync()).map(v=>Math.max(0,Math.min(CAP,v*CAP))));preds[i]=p;p.forEach((v,t)=>{se+=(v-e.r[t])**2;n++})});
+  const rm=Math.sqrt(se/n);$('rm').textContent=rm.toFixed(1)+' ('+A+')';R[A]={rm,loss:losses[losses.length-1],p:preds,s:sd};cmp();$('mt').textContent=`RUL capped at ${CAP} cycles. Window ${W} cycles, ${A}(24) + Dropout + Dense(12) + Dense(1).`;
+  st('Training complete. Move the cycle slider to simulate live monitoring.');
+  $('tr').disabled=false;$('gen').disabled=false;$('ex').disabled=false;sel();fleet()};
+ 
+function sel(){const e=te[+$('en').value];if(!e)return;const s=$('sl');s.max=e.x.length;s.value=e.x.length;s.disabled=false;upd()}
+$('en').onchange=sel;$('sl').oninput=upd;$('sn').onchange=draw;
+ 
+function upd(){const e=te[+$('en').value];if(!e)return;const c=+$('sl').value;$('cy').textContent=`Cycle ${c} / ${e.x.length}`;
+  const p=preds[$('en').value];
+  if(p){const r=p[c-1],[l,col,rec]=stat(r);$('pr').textContent=Math.round(r);$('pr').style.color=`var(${col})`;const b=$('bd');b.textContent=l;b.style.background=`var(${col})`;
+    $('rc').textContent=rec;alertChk(r,e);$('hb').style.width=(r/CAP*100)+'%';$('hb').style.background=`var(${col})`;$('tr2').textContent=`True RUL: ${e.r[c-1]} cycles • Error: ${(r-e.r[c-1]).toFixed(1)}`}
+  draw()}
+ 
+function chart(cv,series,mark,ymax,band){const d=devicePixelRatio||1,w=cv.clientWidth,h=cv.clientHeight;cv.width=w*d;cv.height=h*d;const x=cv.getContext('2d');x.scale(d,d);x.clearRect(0,0,w,h);
+  const n=Math.max(...series.map(s=>s.d.length));if(!n)return;let lo=Infinity,hi=-Infinity;series.forEach(s=>s.d.forEach(v=>{lo=Math.min(lo,v);hi=Math.max(hi,v)}));if(ymax!=null){lo=0;hi=ymax}if(hi===lo)hi=lo+1;
+  const P=24,X=i=>P+i/Math.max(1,n-1)*(w-P-6),Yy=v=>h-18-(v-lo)/(hi-lo)*(h-26);
+  x.strokeStyle=css('--bd');x.fillStyle=css('--mut');x.font='11px system-ui';x.lineWidth=1;
+  for(let i=0;i<=3;i++){const y=Yy(lo+(hi-lo)*i/3);x.beginPath();x.moveTo(P,y);x.lineTo(w,y);x.stroke();x.fillText((lo+(hi-lo)*i/3).toFixed(hi>10?0:2),0,y-2)}
+  if(band){x.fillStyle=css('--c2');x.globalAlpha=.18;x.beginPath();band.u.forEach((v,i)=>x.lineTo(X(i),Yy(v)));for(let i=band.l.length-1;i>=0;i--)x.lineTo(X(i),Yy(band.l[i]));x.fill();x.globalAlpha=1}series.forEach(s=>{x.strokeStyle=css(s.c);x.lineWidth=2;x.beginPath();s.d.forEach((v,i)=>i?x.lineTo(X(i),Yy(v)):x.moveTo(X(i),Yy(v)));x.stroke()});
+  if(mark!=null){x.strokeStyle=css('--r');x.setLineDash([4,3]);x.beginPath();x.moveTo(X(mark),4);x.lineTo(X(mark),h-18);x.stroke();x.setLineDash([])}}
+ 
+function draw(){chart($('cl'),[{d:losses,c:'--a'}]);const e=te[+$('en').value];if(!e)return;const c=+$('sl').value-1;
+  const s=[{d:e.r,c:'--a'}];if(preds[$('en').value])s.push({d:preds[$('en').value],c:'--c2'});const sv=sd[$('en').value],pp=preds[$('en').value];chart($('cp'),s,c,CAP,sv&&pp?{u:pp.map((v,i)=>Math.min(CAP,v+sv[i])),l:pp.map((v,i)=>Math.max(0,v-sv[i]))}:null);multi();
+  const j=+$('sn').value;chart($('cs'),[{d:e.x.map(r=>r[j]),c:'--y'}],c)}
+ 
+function fleet(){const rows=te.map((e,i)=>{const c=e.x.length-1,p=preds[i][c];return{id:e.id,c:c+1,p,t:e.r[c]}}).sort((a,b)=>a.p-b.p);
+  $('ft').tBodies[0].innerHTML=rows.map(r=>{const[l,col]=stat(r.p);return`<tr><td>#${r.id}</td><td>${r.c}</td><td>${r.p.toFixed(1)}</td><td>${r.t}</td><td><span class="badge" style="background:var(${col})">${l}</span></td></tr>`}).join('');window._rows=rows}
+$('ex').onclick=()=>{const csv='engine,cycle,pred_rul,true_rul\n'+te.flatMap((e,i)=>e.x.map((_,t)=>`${e.id},${t+1},${preds[i][t].toFixed(1)},${e.r[t]}`)).join('\n');
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([csv],{type:'text/csv'}));a.download='rul_predictions.csv';a.click()};
+function cmp(){const k=Object.keys(R),b=k.reduce((a,c)=>R[c].rm<R[a].rm?c:a,k[0]);$('cmp').innerHTML='<tr><th>Model</th><th>RMSE</th><th>Final loss</th></tr>'+k.map(m=>`<tr><td>${m}${m===b&&k.length>1?' ✓ best':''}</td><td>${R[m].rm.toFixed(1)}</td><td>${R[m].loss.toFixed(4)}</td></tr>`).join('')}
+$('ar').onchange=()=>{const r=R[$('ar').value];if(r){preds=r.p;sd=r.s;$('rm').textContent=r.rm.toFixed(1)+' ('+$('ar').value+')';sel();fleet()}};
+function multi(){if(!preds[0])return;const P=['--a','--c2','--g','--y','--r','--mut'];chart($('cm'),te.map((e,i)=>({d:preds[i],c:P[i%6]})),+$('sl').value-1,CAP);$('lg').innerHTML=te.map((e,i)=>`<span style="color:var(${P[i%6]})">● #${e.id}</span>`).join(' ')}
+function alertChk(r,e){const th=+$('ath').value,b=$('al');if(r<th){b.style.display='block';const sub=encodeURIComponent('RUL alert: Engine #'+e.id),bd=encodeURIComponent('Predicted RUL '+Math.round(r)+' cycles (threshold '+th+'). Schedule maintenance.');b.innerHTML=`🚨 Engine #${e.id}: RUL ${Math.round(r)} < ${th} cycles. <a style="color:#fff" href="mailto:?subject=${sub}&body=${bd}">✉ Email maintenance team</a>`}else b.style.display='none'}
+$('ath').oninput=upd;
+addEventListener('resize',draw);
+</script></main></body></html>
+ 
